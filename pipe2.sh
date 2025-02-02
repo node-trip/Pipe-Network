@@ -170,8 +170,6 @@ monitor_node() {
         echo "1. Статус сервиса"
         echo "2. Просмотр метрик"
         echo "3. Проверить поинты"
-        echo "4. Сгенерировать реферальный код"
-        echo "5. Использовать реферальный код"
         echo "0. Вернуться в главное меню"
         echo
         read -r subchoice
@@ -190,17 +188,6 @@ monitor_node() {
             3)
                 echo -e "${BLUE}Информация о поинтах:${NC}"
                 cd /var/lib/pop && /opt/dcdn/pop --points
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
-                ;;
-            4)
-                echo -e "${BLUE}Генерация реферального кода:${NC}"
-                cd /var/lib/pop && /opt/dcdn/pop --gen-referral-route
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
-                ;;
-            5)
-                echo -e "${BLUE}Введите реферальный код:${NC}"
-                read -r refcode
-                cd /var/lib/pop && /opt/dcdn/pop --signup-by-referral-route "$refcode"
                 read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
                 ;;
             0)
