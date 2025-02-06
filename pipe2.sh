@@ -1,277 +1,305 @@
 #!/bin/bash
 
-# Проверяем, запущен ли скрипт от имени root
-if [ "$EUID" -ne 0 ]; then 
-    echo "Пожалуйста, запустите скрипт с правами root (используйте sudo)"
-    exit 1
-fi
-
-# Проверяем наличие jq
-if ! command -v jq &> /dev/null; then
-    echo -e "${BLUE}Устанавливаем jq...${NC}"
-    apt-get update
-    apt-get install -y jq
-fi
-
-# Назначаем права на выполнение текущему скрипту
-chmod 755 "$0"
-
-# Цвета для вывода
-RED='\033[0;31m'
+# Установка цветов
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+YELLOW='\033[1;33m'
 
-# Функция для отображения меню
-show_menu() {
+# Функция для отображения заголовка
+print_header() {
     clear
-    echo -e "${BLUE}=== Pipe Network DevNet 2 - Управление нодой ===${NC}"
-    echo -e "${GREEN}Присоединяйтесь к нашему Telegram каналу: ${BLUE}@nodetrip${NC}"
-    echo -e "${GREEN}Гайды по нодам, новости, обновления и помощь${NC}"
-    echo "------------------------------------------------"
-    echo "1. Установить новую ноду"
-    echo "2. Мониторинг ноды"
-    echo "3. Удалить ноду"
-    echo "4. Обновить ноду"
-    echo "5. Показать данные ноды"
-    echo "0. Выход"
-    echo
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║       Установщик Pipe Network Node     ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
 }
 
-# Функция установки ноды
+# Главное меню
+show_main_menu() {
+    while true; do
+        print_header
+        echo -e "${YELLOW}Выберите действие:${NC}"
+        echo "1. Проверка системных требований"
+        echo "2. Установка зависимостей"
+        echo "3. Установка ноды"
+        echo "4. Управление нодой"
+        echo -e "5. Обновление ноды (DevNet -> TestNet) ${RED}*${NC}"
+        echo "6. Удаление ноды"
+        echo "0. Выход"
+        echo ""
+        echo -e "${RED}* Обновление требуется только для старых нод, установленных до января 2024.${NC}"
+        echo -e "${RED}  Если вы устанавливаете ноду с нуля - пропустите этот пункт.${NC}"
+        echo ""
+        read -p "Ваш выбор: " choice
+
+        case $choice in
+            1) check_requirements ;;
+            2) install_dependencies ;;
+            3) install_node ;;
+            4) manage_node ;;
+            5) 
+                echo -e "${YELLOW}Генерация кошелька:${NC}"
+                echo -e "${RED}ВНИМАНИЕ! Это действие создаст новый кошелек!${NC}"
+                echo -e "${RED}Если у вас уже есть кошелек, не используйте эту опцию.${NC}"
+                echo ""
+                echo "При генерации вы получите:"
+                echo "1. Мнемоническую фразу (seed phrase) из 12 слов"
+                echo "2. Публичный ключ"
+                echo "3. Приватный ключ"
+                echo "4. Keypair"
+                echo ""
+                echo -e "${RED}ВАЖНО: Сид фразу можно увидеть ТОЛЬКО ПРИ ГЕНЕРАЦИИ!${NC}"
+                echo -e "${RED}Обязательно сохраните её в надежном месте!${NC}"
+                echo ""
+                read -p "Продолжить генерацию? (y/n): " confirm
+                if [[ $confirm == "y" ]]; then
+                    /opt/dcdn/pipe-tool generate-wallet --node-registry-url="https://rpc.pipedev.network"
+                fi
+                read -p "Нажмите Enter для продолжения"
+                ;;
+            6) remove_node ;;
+            0) exit 0 ;;
+            *) echo -e "${RED}Неверный выбор${NC}" ;;
+        esac
+    done
+}
+
+# Проверка системных требований
+check_requirements() {
+    print_header
+    echo -e "${YELLOW}Проверка системных требований:${NC}"
+    echo "Минимальные требования:"
+    echo "- RAM: 2 GB"
+    echo "- CPU: 2 ядра"
+    echo "- Диск: 60 GB SSD"
+    echo ""
+    echo "Текущие характеристики системы:"
+    echo -e "RAM: $(free -h | awk '/^Mem:/ {print $2}')"
+    echo -e "CPU: $(nproc) ядер"
+    echo -e "Диск: $(df -h / | awk 'NR==2 {print $4}') свободно"
+    echo ""
+    read -p "Нажмите Enter для возврата в меню"
+}
+
+# Установка зависимостей
+install_dependencies() {
+    print_header
+    echo -e "${YELLOW}Установка зависимостей...${NC}"
+    sudo apt update && sudo apt upgrade -y
+    sudo apt install curl iptables build-essential git wget lz4 jq make gcc nano automake \
+    autoconf tmux htop nvme-cli pkg-config libssl-dev libleveldb-dev tar clang aria2 \
+    bsdmainutils ncdu unzip libleveldb-dev -y
+    echo -e "${GREEN}Зависимости установлены успешно!${NC}"
+    read -p "Нажмите Enter для возврата в меню"
+}
+
+# Установка ноды
 install_node() {
-    # Проверяем rate limit перед установкой
-    if curl -s "https://api.pipecdn.app/api/v1/node/check-ip" | grep -q "can only register once per hour"; then
-        echo -e "${RED}Этот IP уже использовался для регистрации в последний час.${NC}"
-        echo -e "${RED}Пожалуйста, подождите 1 час перед новой установкой.${NC}"
-        read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
-        return 1
-    fi
-
-    echo -e "${RED}ВАЖНО: Для установки ноды требуется:${NC}"
-    echo -e "${RED}1. Быть в вайтлисте DevNet 2${NC}"
-    echo -e "${RED}2. Иметь персональную ссылку для скачивания из email${NC}"
-    echo
-    echo -e "${BLUE}Выберите тип установки:${NC}"
-    echo "1. Новая установка (создать новую ноду)"
-    echo "2. Перенос существующей ноды (использовать существующие Node ID и Token)"
-    read -r install_type
+    print_header
+    echo -e "${YELLOW}Установка ноды:${NC}"
     
-    if [ "$install_type" = "2" ]; then
-        echo -e "${BLUE}Введите существующий Node ID:${NC}"
-        read -r node_id
-        echo -e "${BLUE}Введите существующий Token:${NC}"
-        read -r token
-    fi
-
-    echo -e "${BLUE}Введите ссылку для скачивания из письма:${NC}"
-    read -r download_url
-
-    echo -e "${GREEN}Начинаем установку ноды...${NC}"
+    echo -e "${GREEN}1. Создание директории...${NC}"
+    sudo mkdir -p /opt/dcdn
     
-    # Проверка системных требований
-    mem_gb=$(free -g | awk '/^Mem:/{print $2}')
-    disk_gb=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    echo -e "${GREEN}2. Настройка переменных...${NC}"
+    echo -e "${YELLOW}Для получения ссылок:${NC}"
+    echo "1. Найдите в почте письмо 'Welcome to Pipe Network'"
+    echo "2. Нажмите на ссылку 'Download here' возле DCDND"
+    echo "3. Скопируйте полученный URL"
+    echo "4. То же самое для Pipe-Tool"
+    echo ""
+    read -p "Введите DCDND_URL (ссылка на скачивание dcdnd): " dcdnd_url
+    read -p "Введите PIPE_URL (ссылка на скачивание pipe-tool): " pipe_url
+    export DCDND_URL="$dcdnd_url"
+    export PIPE_URL="$pipe_url"
     
-    if [ $mem_gb -lt 4 ]; then
-        echo -e "${RED}Ошибка: Требуется минимум 4GB RAM. У вас: ${mem_gb}GB${NC}"
-        return 1
-    fi
+    echo -e "${GREEN}3. Загрузка бинарных файлов...${NC}"
+    sudo curl -L "$PIPE_URL" -o /opt/dcdn/pipe-tool
+    sudo curl -L "$DCDND_URL" -o /opt/dcdn/dcdnd
     
-    if [ $disk_gb -lt 100 ]; then
-        echo -e "${RED}Ошибка: Требуется минимум 100GB свободного места. У вас: ${disk_gb}GB${NC}"
-        return 1
-    fi
-
-    # Создание сервисного пользователя и директорий
-    useradd -r -m -s /sbin/nologin dcdn-svc-user -d /home/dcdn-svc-user 2>/dev/null || true
+    echo -e "${GREEN}4. Настройка прав доступа...${NC}"
+    sudo chmod +x /opt/dcdn/pipe-tool
+    sudo chmod +x /opt/dcdn/dcdnd
     
-    # Создание необходимых директорий
-    mkdir -p /opt/dcdn
-    mkdir -p /var/lib/pop
-    mkdir -p /var/cache/pop/download_cache
-    
-    # Скачивание и установка бинарного файла
-    echo -e "${BLUE}Скачиваем ноду...${NC}"
-    curl -L -o pop "$download_url"
-    chmod +x pop
-    mv pop /opt/dcdn/
-    
-    # Настройка прав доступа
-    chown -R dcdn-svc-user:dcdn-svc-user /var/lib/pop
-    chown -R dcdn-svc-user:dcdn-svc-user /var/cache/pop
-    chown -R dcdn-svc-user:dcdn-svc-user /opt/dcdn
-
-    # Запрос адреса кошелька Solana
-    echo -e "${BLUE}Введите адрес вашего кошелька Solana (SOL) для получения вознаграждений:${NC}"
-    read -r solana_address
-
-    # Создание сервиса systemd
-    cat > /etc/systemd/system/pop.service << EOF
+    echo -e "${GREEN}5. Создание systemd файла...${NC}"
+    sudo tee /etc/systemd/system/dcdnd.service << 'EOF'
 [Unit]
-Description=Pipe POP Node Service
+Description=DCDN Node Service
 After=network.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-User=dcdn-svc-user
-WorkingDirectory=/var/lib/pop
-ExecStart=/opt/dcdn/pop --ram=8 --pubKey ${solana_address} --max-disk 200 --cache-dir /var/cache/pop/download_cache
+ExecStart=/opt/dcdn/dcdnd \
+                --grpc-server-url=0.0.0.0:8002 \
+                --http-server-url=0.0.0.0:8003 \
+                --node-registry-url="https://rpc.pipedev.network" \
+                --cache-max-capacity-mb=1024 \
+                --credentials-dir=/root/.permissionless \
+                --allow-origin=*
 Restart=always
 RestartSec=5
+LimitNOFILE=65536
+LimitNPROC=4096
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dcdn-node
+WorkingDirectory=/opt/dcdn
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # Запускаем сервис
-    systemctl daemon-reload
-    systemctl enable pop
-    systemctl start pop
-
-    # Проверяем логи на наличие rate limit
-    sleep 5
-    if journalctl -u pop -n 50 | grep -q "Rate limit"; then
-        echo -e "${RED}Ошибка: IP уже использовался для регистрации. Нужно подождать 1 час.${NC}"
-        systemctl stop pop
-        return 1
-    fi
-
-    # Ждем регистрации ноды
-    echo -e "${BLUE}Ожидаем регистрации ноды...${NC}"
-    for i in {1..24}; do
-        sleep 5
-        if [ -f "/var/lib/pop/node_info.json" ]; then
-            node_id=$(jq -r .node_id /var/lib/pop/node_info.json)
-            if [ ! -z "$node_id" ] && [ "$node_id" != "null" ] && [ ${#node_id} -gt 10 ]; then
-                echo -e "${GREEN}Нода успешно зарегистрирована с ID: $node_id${NC}"
-                break
-            fi
-        fi
-        echo -e "${BLUE}Ожидаем регистрацию... Попытка $i из 24${NC}"
-    done
-
-    echo -e "${GREEN}Установка завершена! Нода запущена.${NC}"
-    echo
-    echo -e "${BLUE}Остались вопросы? Присоединяйтесь к нашему Telegram каналу:${NC}"
-    echo -e "${GREEN}https://t.me/nodetrip${NC}"
-    echo -e "${BLUE}Там вы найдете:${NC}"
-    echo -e "${GREEN}• Гайды по установке и настройке нод${NC}"
-    echo -e "${GREEN}• Новости и обновления${NC}"
-    echo -e "${GREEN}• Помощь от сообщества${NC}"
-    read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+    
+    echo -e "${GREEN}6. Открытие портов...${NC}"
+    sudo ufw allow 8002/tcp
+    sudo ufw allow 8003/tcp
+    
+    echo -e "${GREEN}7. Вход и генерация токена...${NC}"
+    /opt/dcdn/pipe-tool login --node-registry-url="https://rpc.pipedev.network"
+    /opt/dcdn/pipe-tool generate-registration-token --node-registry-url="https://rpc.pipedev.network"
+    
+    echo -e "${GREEN}Установка завершена!${NC}"
+    read -p "Нажмите Enter для возврата в меню"
 }
 
-# Функция мониторинга
-monitor_node() {
+# Управление нодой
+manage_node() {
     while true; do
-        clear
-        echo -e "${BLUE}=== Мониторинг ноды ===${NC}"
-        echo "1. Статус сервиса"
-        echo "2. Просмотр метрик"
-        echo "3. Проверить поинты"
-        echo "0. Вернуться в главное меню"
-        echo
-        read -r subchoice
-
-        case $subchoice in
+        print_header
+        echo -e "${YELLOW}Управление нодой:${NC}"
+        echo "1. Запустить ноду"
+        echo "2. Остановить ноду"
+        echo "3. Перезапустить ноду"
+        echo "4. Проверить статус"
+        echo "5. Сгенерировать кошелек"
+        echo "6. Привязать кошелек"
+        echo "7. Открыть эксплорер в браузере"
+        echo "8. Показать данные кошелька"
+        echo "0. Назад"
+        
+        read -p "Выберите действие: " action
+        case $action in
             1)
-                echo -e "${BLUE}Статус сервиса:${NC}"
-                systemctl status pop
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
+                sudo systemctl daemon-reload
+                sudo systemctl enable dcdnd
+                sudo systemctl start dcdnd
+                read -p "Нажмите Enter для продолжения"
                 ;;
-            2)
-                echo -e "${BLUE}Метрики ноды:${NC}"
-                cd /var/lib/pop && /opt/dcdn/pop --status
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
+            2) 
+                sudo systemctl stop dcdnd
+                read -p "Нажмите Enter для продолжения"
                 ;;
-            3)
-                echo -e "${BLUE}Информация о поинтах:${NC}"
-                cd /var/lib/pop && /opt/dcdn/pop --points
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
+            3) 
+                sudo systemctl restart dcdnd
+                read -p "Нажмите Enter для продолжения"
                 ;;
-            0)
-                return
+            4) 
+                echo -e "${YELLOW}Проверка статуса ноды:${NC}"
+                echo -e "${GREEN}1. Статус systemd сервиса:${NC}"
+                sudo systemctl status dcdnd
+                echo ""
+                echo -e "${GREEN}2. Проверка регистрации ноды:${NC}"
+                /opt/dcdn/pipe-tool list-nodes --node-registry-url="https://rpc.pipedev.network/"
+                echo ""
+                echo -e "${GREEN}3. Проверка портов:${NC}"
+                sudo lsof -i :8002,8003
+                read -p "Нажмите Enter для продолжения"
                 ;;
-            *)
+            5) 
+                echo -e "${YELLOW}Генерация кошелька:${NC}"
+                echo -e "${RED}ВНИМАНИЕ! Это действие создаст новый кошелек!${NC}"
+                echo -e "${RED}Если у вас уже есть кошелек, не используйте эту опцию.${NC}"
+                echo ""
+                echo "При генерации вы получите:"
+                echo "1. Мнемоническую фразу (seed phrase) из 12 слов"
+                echo "2. Публичный ключ"
+                echo "3. Приватный ключ"
+                echo "4. Keypair"
+                echo ""
+                echo -e "${RED}ВАЖНО: Сид фразу можно увидеть ТОЛЬКО ПРИ ГЕНЕРАЦИИ!${NC}"
+                echo -e "${RED}Обязательно сохраните её в надежном месте!${NC}"
+                echo ""
+                read -p "Продолжить генерацию? (y/n): " confirm
+                if [[ $confirm == "y" ]]; then
+                    /opt/dcdn/pipe-tool generate-wallet --node-registry-url="https://rpc.pipedev.network"
+                fi
+                read -p "Нажмите Enter для продолжения"
+                ;;
+            6) 
+                /opt/dcdn/pipe-tool link-wallet --node-registry-url="https://rpc.pipedev.network"
+                read -p "Нажмите Enter для продолжения"
+                ;;
+            7)
+                echo -e "${YELLOW}Открываю эксплорер в браузере...${NC}"
+                xdg-open "https://explorer.pipedev.network/" 2>/dev/null || \
+                echo -e "${RED}Не могу открыть браузер. Посетите вручную:${NC}"
+                echo -e "${GREEN}https://explorer.pipedev.network/${NC}"
+                read -p "Нажмите Enter для продолжения"
+                ;;
+            8)
+                echo -e "${YELLOW}Данные кошелька:${NC}"
+                echo -e "${GREEN}1. Публичный ключ (для проверки баланса):${NC}"
+                /opt/dcdn/pipe-tool show-public-key
+                echo ""
+                echo -e "${GREEN}2. Приватный ключ и Keypair (секретные данные):${NC}"
+                echo -e "${YELLOW}Keypair - это адрес для получения наград, его можно использовать в эксплорере${NC}"
+                echo -e "${RED}ВНИМАНИЕ: Сохраните все данные в надежном месте!${NC}"
+                echo "Нажмите Enter для просмотра секретных данных..."
+                read
+                /opt/dcdn/pipe-tool show-private-key
+                echo ""
+                echo -e "${RED}ВАЖНО: ${NC}"
+                echo "1. Сохраните все данные в надежном месте"
+                echo "2. Keypair используется для проверки наград в эксплорере"
+                echo "3. Приватный ключ никому не показывайте"
+                read -p "Нажмите Enter для продолжения"
+                ;;
+            0) return ;;
+            *) 
                 echo -e "${RED}Неверный выбор${NC}"
-                read -n 1 -s -r -p "Нажмите любую клавишу для продолжения..."
+                read -p "Нажмите Enter для продолжения"
                 ;;
         esac
     done
 }
 
-# Функция удаления ноды
+# Обновление ноды
+update_node() {
+    print_header
+    echo -e "${YELLOW}Обновление ноды (DevNet -> TestNet):${NC}"
+    echo "1. Перелогиниться"
+    echo "2. Сгенерировать новый токен регистрации"
+    echo "3. Перезапустить сервис"
+    echo "4. Проверить регистрацию ноды"
+    echo "0. Назад"
+    
+    read -p "Выберите шаг: " step
+    case $step in
+        1) /opt/dcdn/pipe-tool login --node-registry-url="https://rpc.pipedev.network" ;;
+        2) /opt/dcdn/pipe-tool generate-registration-token --node-registry-url="https://rpc.pipedev.network" ;;
+        3) systemctl restart dcdnd ;;
+        4) /opt/dcdn/pipe-tool list-nodes --node-registry-url="https://rpc.pipedev.network" ;;
+        0) return ;;
+    esac
+    read -p "Нажмите Enter для продолжения"
+}
+
+# Удаление ноды
 remove_node() {
-    echo -e "${RED}Вы уверены, что хотите удалить ноду? (y/n)${NC}"
-    read -r confirm
-    if [ "$confirm" = "y" ]; then
-        systemctl stop pop
-        systemctl disable pop
-        rm /etc/systemd/system/pop.service
-        systemctl daemon-reload
-        rm -rf /opt/dcdn
-        rm -rf /var/lib/pop
-        rm -rf /var/cache/pop
-        userdel dcdn-svc-user
+    print_header
+    echo -e "${RED}Внимание! Вы собираетесь удалить ноду!${NC}"
+    read -p "Вы уверены? (y/n): " confirm
+    if [[ $confirm == "y" ]]; then
+        sudo systemctl stop dcdnd.service
+        sudo systemctl disable dcdnd.service
+        sudo rm /etc/systemd/system/dcdnd.service
+        sudo systemctl daemon-reload
+        rm -r /opt/dcdn
         echo -e "${GREEN}Нода успешно удалена${NC}"
     fi
-    read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+    read -p "Нажмите Enter для возврата в меню"
 }
 
-# Функция обновления ноды
-update_node() {
-    echo -e "${GREEN}Начинаем обновление ноды...${NC}"
-    
-    # Останавливаем сервис
-    systemctl stop pop
-    
-    # Скачиваем новую версию
-    curl -L -o pop "https://dl.pipecdn.app/v0.2.2/pop"
-    chmod +x pop
-    mv pop /opt/dcdn/
-    
-    # Обновляем права доступа
-    chown dcdn-svc-user:dcdn-svc-user /opt/dcdn/pop
-    
-    # Проверяем версию после обновления
-    new_version=$(/opt/dcdn/pop --version | grep -oP 'Pipe PoP Cache Node \K[\d.]+')
-    if [ "$new_version" = "0.2.2" ]; then
-        echo -e "${GREEN}Успешно обновлено до версии 0.2.2${NC}"
-    else
-        echo -e "${RED}Ошибка обновления. Текущая версия: $new_version${NC}"
-    fi
-    
-    # Перезапускаем сервис
-    systemctl start pop
-    
-    echo -e "${GREEN}Обновление завершено! Нода перезапущена.${NC}"
-    read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
-}
-
-# Функция просмотра данных ноды
-show_node_info() {
-    if [ -f "/var/lib/pop/node_info.json" ]; then
-        echo -e "${BLUE}Данные ноды:${NC}"
-        echo -e "${GREEN}Node ID:${NC} $(jq -r .node_id /var/lib/pop/node_info.json)"
-        echo -e "${GREEN}Token:${NC} $(jq -r .token /var/lib/pop/node_info.json)"
-    else
-        echo -e "${RED}Файл node_info.json не найден!${NC}"
-    fi
-    read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
-}
-
-# Основной цикл меню
-while true; do
-    show_menu
-    read -r choice
-    case $choice in
-        1) install_node ;;
-        2) monitor_node ;;
-        3) remove_node ;;
-        4) update_node ;;
-        5) show_node_info ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}Неверный выбор${NC}" ;;
-    esac
-done
+# Запуск главного меню
+show_main_menu 
