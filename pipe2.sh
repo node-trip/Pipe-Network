@@ -73,8 +73,7 @@ install_node() {
 }
 EOF
 
-        echo -e "${BLUE}Введите ссылку для скачивания из письма:${NC}"
-        read -r download_url
+        download_url="https://dl.pipecdn.app/v0.2.4/pop"
     else
         echo -e "${BLUE}Введите ссылку для скачивания из письма:${NC}"
         read -r download_url
@@ -281,7 +280,7 @@ show_node_info() {
 
 update() {
     systemctl stop pop && \
-    wget https://dl.pipecdn.app/v0.2.3/pop -O pop && \
+    wget https://dl.pipecdn.app/v0.2.4/pop -O pop && \
     chmod +x pop && \
     mv pop /opt/dcdn/pop && \
     systemctl start pop && \
