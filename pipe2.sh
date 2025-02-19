@@ -73,7 +73,7 @@ install_node() {
 }
 EOF
 
-        download_url="https://dl.pipecdn.app/v0.2.4/pop"
+        download_url="https://dl.pipecdn.app/v0.2.8/pop"
     else
         echo -e "${BLUE}Введите ссылку для скачивания из письма:${NC}"
         read -r download_url
@@ -244,7 +244,7 @@ update_node() {
     systemctl stop pop
     
     # Скачиваем новую версию
-    curl -L -o pop "https://dl.pipecdn.app/v0.2.2/pop"
+    curl -L -o pop "https://dl.pipecdn.app/v0.2.8/pop"
     chmod +x pop
     mv pop /opt/dcdn/
     
@@ -253,8 +253,8 @@ update_node() {
     
     # Проверяем версию после обновления
     new_version=$(/opt/dcdn/pop --version | grep -oP 'Pipe PoP Cache Node \K[\d.]+')
-    if [ "$new_version" = "0.2.2" ]; then
-        echo -e "${GREEN}Успешно обновлено до версии 0.2.2${NC}"
+    if [ "$new_version" = "0.2.8" ]; then
+        echo -e "${GREEN}Успешно обновлено до версии 0.2.8${NC}"
     else
         echo -e "${RED}Ошибка обновления. Текущая версия: $new_version${NC}"
     fi
@@ -280,7 +280,7 @@ show_node_info() {
 
 update() {
     systemctl stop pop && \
-    wget https://dl.pipecdn.app/v0.2.4/pop -O pop && \
+    wget https://dl.pipecdn.app/v0.2.8/pop -O pop && \
     chmod +x pop && \
     mv pop /opt/dcdn/pop && \
     systemctl start pop && \
