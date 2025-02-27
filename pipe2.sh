@@ -22,6 +22,17 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Путь к файлу логов
+LOG_FILE="/var/log/pipe_install.log"
+
+# Функция для логирования
+log_message() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$LOG_FILE"
+    echo -e "$message"
+}
+
 # Функция для отображения меню
 show_menu() {
     clear
@@ -34,64 +45,160 @@ show_menu() {
     echo "3. Удалить ноду"
     echo "4. Обновить ноду (быстрое обновление одной командой)"
     echo "5. Показать данные ноды"
+    echo "6. Показать логи установки"
     echo "0. Выход"
     echo
 }
 
+# Функция для просмотра логов
+show_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        echo -e "${BLUE}=== Логи установки ===${NC}"
+        cat "$LOG_FILE"
+        echo
+        echo -e "${BLUE}Логи сохранены в файле: $LOG_FILE${NC}"
+    else
+        echo -e "${RED}Файл логов не найден${NC}"
+    fi
+    read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+}
+
 # Функция установки ноды
 install_node() {
+    # Очищаем старые логи перед новой установкой
+    [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "${LOG_FILE}.old"
+    
     # Проверяем rate limit перед установкой
     if curl -s "https://api.pipecdn.app/api/v1/node/check-ip" | grep -q "can only register once per hour"; then
-        echo -e "${RED}Этот IP уже использовался для регистрации в последний час.${NC}"
-        echo -e "${RED}Пожалуйста, подождите 1 час перед новой установкой.${NC}"
+        log_message "${RED}Этот IP уже использовался для регистрации в последний час.${NC}"
+        log_message "${RED}Пожалуйста, подождите 1 час перед новой установкой.${NC}"
         read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
         return 1
     fi
 
-    echo -e "${RED}ВАЖНО: Для установки ноды требуется:${NC}"
-    echo -e "${RED}1. Быть в вайтлисте DevNet 2${NC}"
-    echo -e "${RED}2. Иметь персональную ссылку для скачивания из email${NC}"
+    log_message "${RED}ВАЖНО: Для установки ноды требуется:${NC}"
+    log_message "${RED}1. Быть в вайтлисте DevNet 2${NC}"
+    log_message "${RED}2. Иметь персональную ссылку для скачивания из email${NC}"
     echo
-    echo -e "${BLUE}Выберите тип установки:${NC}"
+    log_message "${BLUE}Выберите тип установки:${NC}"
     echo "1. Новая установка (создать новую ноду)"
     echo "2. Перенос существующей ноды (использовать существующие Node ID и Token)"
     read -r install_type
     
     if [ "$install_type" = "2" ]; then
-        echo -e "${BLUE}Введите существующий Node ID:${NC}"
+        log_message "${BLUE}Введите существующий Node ID:${NC}"
         read -r node_id
-        echo -e "${BLUE}Введите существующий Token:${NC}"
+        log_message "Введен Node ID: $node_id"
+        
+        log_message "${BLUE}Введите существующий Token:${NC}"
         read -r token
+        log_message "Введен Token: $token"
 
-        # Создаем node_info.json до установки сервиса
-        mkdir -p /var/lib/pop
-        cat > /var/lib/pop/node_info.json << EOF
+        # Проверяем введенные данные
+        if [ -z "$node_id" ] || [ -z "$token" ]; then
+            log_message "${RED}Ошибка: Node ID или Token не могут быть пустыми${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        log_message "${BLUE}Начинаем процесс переноса ноды...${NC}"
+        
+        # Создаем директорию с логированием
+        log_message "${BLUE}Создаем директорию /var/lib/pop${NC}"
+        if ! mkdir -p /var/lib/pop 2>/tmp/mkdir.error; then
+            log_message "${RED}Ошибка при создании директории: $(cat /tmp/mkdir.error)${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        # Проверяем права на запись
+        log_message "${BLUE}Проверяем права на запись в директорию${NC}"
+        if ! touch /var/lib/pop/test_write 2>/tmp/touch.error; then
+            log_message "${RED}Ошибка прав доступа: $(cat /tmp/touch.error)${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+        rm -f /var/lib/pop/test_write
+
+        # Создаем node_info.json с логированием
+        log_message "${BLUE}Создаем файл node_info.json${NC}"
+        if ! cat > /var/lib/pop/node_info.json.tmp << EOF
 {
   "node_id": "${node_id}",
   "registered": true,
   "token": "${token}"
 }
 EOF
+        then
+            log_message "${RED}Ошибка при создании временного файла node_info.json${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
 
+        # Проверяем JSON перед перемещением
+        log_message "${BLUE}Проверяем корректность JSON${NC}"
+        if ! jq empty /var/lib/pop/node_info.json.tmp 2>/tmp/jq.error; then
+            log_message "${RED}Ошибка в JSON: $(cat /tmp/jq.error)${NC}"
+            rm -f /var/lib/pop/node_info.json.tmp
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        # Перемещаем файл
+        log_message "${BLUE}Перемещаем файл в финальное расположение${NC}"
+        if ! mv /var/lib/pop/node_info.json.tmp /var/lib/pop/node_info.json 2>/tmp/mv.error; then
+            log_message "${RED}Ошибка при перемещении файла: $(cat /tmp/mv.error)${NC}"
+            rm -f /var/lib/pop/node_info.json.tmp
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        # Проверяем финальный файл
+        log_message "${BLUE}Проверяем финальный файл${NC}"
+        if [ ! -f "/var/lib/pop/node_info.json" ]; then
+            log_message "${RED}Ошибка: Финальный файл не существует${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        # Проверяем содержимое
+        log_message "${BLUE}Проверяем содержимое файла${NC}"
+        saved_node_id=$(jq -r .node_id /var/lib/pop/node_info.json 2>/tmp/jq_read.error)
+        if [ $? -ne 0 ]; then
+            log_message "${RED}Ошибка при чтении Node ID: $(cat /tmp/jq_read.error)${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        saved_token=$(jq -r .token /var/lib/pop/node_info.json 2>/tmp/jq_read.error)
+        if [ $? -ne 0 ]; then
+            log_message "${RED}Ошибка при чтении Token: $(cat /tmp/jq_read.error)${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        if [ "$saved_node_id" != "$node_id" ] || [ "$saved_token" != "$token" ]; then
+            log_message "${RED}Ошибка: Сохраненные данные не совпадают с введенными${NC}"
+            log_message "${RED}Ожидалось: Node ID='$node_id', Token='$token'${NC}"
+            log_message "${RED}Получено: Node ID='$saved_node_id', Token='$saved_token'${NC}"
+            read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
+            return 1
+        fi
+
+        log_message "${GREEN}Файл node_info.json успешно создан и проверен${NC}"
         download_url="https://dl.pipecdn.app/v0.2.8/pop"
     else
-        echo -e "${BLUE}Введите ссылку для скачивания из письма:${NC}"
+        log_message "${BLUE}Введите ссылку для скачивания из письма:${NC}"
         read -r download_url
     fi
 
-    echo -e "${GREEN}Начинаем установку ноды...${NC}"
+    log_message "${GREEN}Начинаем установку ноды...${NC}"
     
     # Проверка системных требований
     mem_gb=$(free -g | awk '/^Mem:/{print $2}')
-    disk_gb=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
     
     if [ $mem_gb -lt 4 ]; then
-        echo -e "${RED}Ошибка: Требуется минимум 4GB RAM. У вас: ${mem_gb}GB${NC}"
-        return 1
-    fi
-    
-    if [ $disk_gb -lt 100 ]; then
-        echo -e "${RED}Ошибка: Требуется минимум 100GB свободного места. У вас: ${disk_gb}GB${NC}"
+        log_message "${RED}Ошибка: Требуется минимум 4GB RAM. У вас: ${mem_gb}GB${NC}"
         return 1
     fi
 
@@ -104,7 +211,7 @@ EOF
     mkdir -p /var/cache/pop/download_cache
     
     # Скачивание и установка бинарного файла
-    echo -e "${BLUE}Скачиваем ноду...${NC}"
+    log_message "${BLUE}Скачиваем ноду...${NC}"
     curl -L -o pop "$download_url"
     chmod +x pop
     mv pop /opt/dcdn/
@@ -115,7 +222,7 @@ EOF
     chown -R dcdn-svc-user:dcdn-svc-user /opt/dcdn
 
     # Запрос адреса кошелька Solana
-    echo -e "${BLUE}Введите адрес вашего кошелька Solana (SOL) для получения вознаграждений:${NC}"
+    log_message "${BLUE}Введите адрес вашего кошелька Solana (SOL) для получения вознаграждений:${NC}"
     read -r solana_address
 
     # Создание сервиса systemd
@@ -144,38 +251,38 @@ EOF
     # Проверяем логи на наличие rate limit
     sleep 5
     if journalctl -u pop -n 50 | grep -q "Rate limit"; then
-        echo -e "${RED}Ошибка: IP уже использовался для регистрации. Нужно подождать 1 час.${NC}"
+        log_message "${RED}Ошибка: IP уже использовался для регистрации. Нужно подождать 1 час.${NC}"
         systemctl stop pop
         return 1
     fi
 
     # Проверяем тип установки после запуска
     if [ "$install_type" = "2" ]; then
-        echo -e "${GREEN}Нода перенесена с существующим ID: $node_id${NC}"
+        log_message "${GREEN}Нода перенесена с существующим ID: $node_id${NC}"
     else
         # Ждем регистрации только для новой установки
-        echo -e "${BLUE}Ожидаем регистрации ноды...${NC}"
+        log_message "${BLUE}Ожидаем регистрации ноды...${NC}"
         for i in {1..24}; do
             sleep 5
             if [ -f "/var/lib/pop/node_info.json" ]; then
                 node_id=$(jq -r .node_id /var/lib/pop/node_info.json)
                 if [ ! -z "$node_id" ] && [ "$node_id" != "null" ] && [ ${#node_id} -gt 10 ]; then
-                    echo -e "${GREEN}Нода успешно зарегистрирована с ID: $node_id${NC}"
+                    log_message "${GREEN}Нода успешно зарегистрирована с ID: $node_id${NC}"
                     break
                 fi
             fi
-            echo -e "${BLUE}Ожидаем регистрацию... Попытка $i из 24${NC}"
+            log_message "${BLUE}Ожидаем регистрацию... Попытка $i из 24${NC}"
         done
     fi
 
-    echo -e "${GREEN}Установка завершена! Нода запущена.${NC}"
+    log_message "${GREEN}Установка завершена! Нода запущена.${NC}"
     echo
-    echo -e "${BLUE}Остались вопросы? Присоединяйтесь к нашему Telegram каналу:${NC}"
-    echo -e "${GREEN}https://t.me/nodetrip${NC}"
-    echo -e "${BLUE}Там вы найдете:${NC}"
-    echo -e "${GREEN}• Гайды по установке и настройке нод${NC}"
-    echo -e "${GREEN}• Новости и обновления${NC}"
-    echo -e "${GREEN}• Помощь от сообщества${NC}"
+    log_message "${BLUE}Остались вопросы? Присоединяйтесь к нашему Telegram каналу:${NC}"
+    log_message "${GREEN}https://t.me/nodetrip${NC}"
+    log_message "${BLUE}Там вы найдете:${NC}"
+    log_message "${GREEN}• Гайды по установке и настройке нод${NC}"
+    log_message "${GREEN}• Новости и обновления${NC}"
+    log_message "${GREEN}• Помощь от сообщества${NC}"
     read -n 1 -s -r -p "Нажмите любую клавишу для возврата в меню..."
 }
 
@@ -297,6 +404,7 @@ while true; do
         3) remove_node ;;
         4) update_node ;;
         5) show_node_info ;;
+        6) show_logs ;;
         0) exit 0 ;;
         *) echo -e "${RED}Неверный выбор${NC}" ;;
     esac
