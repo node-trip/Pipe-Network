@@ -339,7 +339,7 @@ check_node_health() {
     if ! command -v aios-cli &> /dev/null; then
         log_message "aios-cli не найден в PATH"
         return 1
-    }
+    fi
     
     return 0
 }
@@ -467,8 +467,8 @@ check_monitor_status() {
         echo -e "${RED}❌ Порт 50051 не прослушивается${NC}"
     fi
     
-    # Проверяем поинты
-    CURRENT_POINTS=$(aios-cli hive points | grep "Points:" | awk '{print $2}')
+    # Проверяем поинты с полным путем к aios-cli
+    CURRENT_POINTS=$($HOME/.aios/aios-cli hive points 2>/dev/null | grep "Points:" | awk '{print $2}')
     if [ ! -z "$CURRENT_POINTS" ]; then
         echo -e "${GREEN}✅ Текущие поинты: $CURRENT_POINTS${NC}"
     else
