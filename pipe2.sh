@@ -108,7 +108,23 @@ check_points() {
         sleep 5
     fi
     
-    aios-cli hive points
+    # Используем тот же метод, что и в отдельном скрипте
+    POINTS_OUTPUT=$($HOME/.aios/aios-cli hive points 2>/dev/null)
+    if [ ! -z "$POINTS_OUTPUT" ]; then
+        CURRENT_POINTS=$(echo "$POINTS_OUTPUT" | grep "Points:" | awk '{print $2}')
+        MULTIPLIER=$(echo "$POINTS_OUTPUT" | grep "Multiplier:" | awk '{print $2}')
+        TIER=$(echo "$POINTS_OUTPUT" | grep "Tier:" | awk '{print $2}')
+        UPTIME=$(echo "$POINTS_OUTPUT" | grep "Uptime:" | awk '{print $2}')
+        ALLOCATION=$(echo "$POINTS_OUTPUT" | grep "Allocation:" | awk '{print $2}')
+        
+        echo -e "${GREEN}✅ Текущие поинты: $CURRENT_POINTS${NC}"
+        echo -e "${GREEN}✅ Множитель: $MULTIPLIER${NC}"
+        echo -e "${GREEN}✅ Тир: $TIER${NC}"
+        echo -e "${GREEN}✅ Аптайм: $UPTIME${NC}"
+        echo -e "${GREEN}✅ Аллокация: $ALLOCATION${NC}"
+    else
+        echo -e "${RED}❌ Не удалось получить значение поинтов${NC}"
+    fi
 }
 
 check_status() {
@@ -467,23 +483,41 @@ check_monitor_status() {
         echo -e "${RED}❌ Порт 50051 не прослушивается${NC}"
     fi
     
-    # Проверяем поинты используя полный путь к исполняемому файлу
-    POINTS_OUTPUT=$($HOME/.aios/aios-cli hive points 2>/dev/null)
-    if [ ! -z "$POINTS_OUTPUT" ]; then
-        CURRENT_POINTS=$(echo "$POINTS_OUTPUT" | grep "Points:" | awk '{print $2}')
-        MULTIPLIER=$(echo "$POINTS_OUTPUT" | grep "Multiplier:" | awk '{print $2}')
-        TIER=$(echo "$POINTS_OUTPUT" | grep "Tier:" | awk '{print $2}')
-        UPTIME=$(echo "$POINTS_OUTPUT" | grep "Uptime:" | awk '{print $2}')
-        ALLOCATION=$(echo "$POINTS_OUTPUT" | grep "Allocation:" | awk '{print $2}')
-        
-        echo -e "${GREEN}✅ Текущие поинты: $CURRENT_POINTS${NC}"
-        echo -e "${GREEN}✅ Множитель: $MULTIPLIER${NC}"
-        echo -e "${GREEN}✅ Тир: $TIER${NC}"
-        echo -e "${GREEN}✅ Аптайм: $UPTIME${NC}"
-        echo -e "${GREEN}✅ Аллокация: $ALLOCATION${NC}"
-    else
-        echo -e "${RED}❌ Не удалось получить значение поинтов${NC}"
-    fi
+    # Создаем и запускаем скрипт проверки поинтов
+    create_check_script
+    echo -e "${YELLOW}Запускаем отдельный скрипт проверки поинтов...${NC}"
+    $HOME/check_hyperspace.sh
+}
+
+create_check_script() {
+    # Создаем отдельный скрипт для проверки статуса
+    cat > $HOME/check_hyperspace.sh << 'EOL'
+#!/bin/bash
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Проверяем поинты
+POINTS_OUTPUT=$($HOME/.aios/aios-cli hive points 2>/dev/null)
+if [ ! -z "$POINTS_OUTPUT" ]; then
+    CURRENT_POINTS=$(echo "$POINTS_OUTPUT" | grep "Points:" | awk '{print $2}')
+    MULTIPLIER=$(echo "$POINTS_OUTPUT" | grep "Multiplier:" | awk '{print $2}')
+    TIER=$(echo "$POINTS_OUTPUT" | grep "Tier:" | awk '{print $2}')
+    UPTIME=$(echo "$POINTS_OUTPUT" | grep "Uptime:" | awk '{print $2}')
+    ALLOCATION=$(echo "$POINTS_OUTPUT" | grep "Allocation:" | awk '{print $2}')
+    
+    echo -e "${GREEN}✅ Текущие поинты: $CURRENT_POINTS${NC}"
+    echo -e "${GREEN}✅ Множитель: $MULTIPLIER${NC}"
+    echo -e "${GREEN}✅ Тир: $TIER${NC}"
+    echo -e "${GREEN}✅ Аптайм: $UPTIME${NC}"
+    echo -e "${GREEN}✅ Аллокация: $ALLOCATION${NC}"
+else
+    echo -e "${RED}❌ Не удалось получить значение поинтов${NC}"
+fi
+EOL
+    chmod +x $HOME/check_hyperspace.sh
 }
 
 while true; do
