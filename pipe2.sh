@@ -467,10 +467,20 @@ check_monitor_status() {
         echo -e "${RED}❌ Порт 50051 не прослушивается${NC}"
     fi
     
-    # Проверяем поинты с полным путем к aios-cli
-    CURRENT_POINTS=$($HOME/.aios/aios-cli hive points 2>/dev/null | grep "Points:" | awk '{print $2}')
-    if [ ! -z "$CURRENT_POINTS" ]; then
+    # Проверяем поинты используя полный путь к исполняемому файлу
+    POINTS_OUTPUT=$($HOME/.aios/aios-cli hive points 2>/dev/null)
+    if [ ! -z "$POINTS_OUTPUT" ]; then
+        CURRENT_POINTS=$(echo "$POINTS_OUTPUT" | grep "Points:" | awk '{print $2}')
+        MULTIPLIER=$(echo "$POINTS_OUTPUT" | grep "Multiplier:" | awk '{print $2}')
+        TIER=$(echo "$POINTS_OUTPUT" | grep "Tier:" | awk '{print $2}')
+        UPTIME=$(echo "$POINTS_OUTPUT" | grep "Uptime:" | awk '{print $2}')
+        ALLOCATION=$(echo "$POINTS_OUTPUT" | grep "Allocation:" | awk '{print $2}')
+        
         echo -e "${GREEN}✅ Текущие поинты: $CURRENT_POINTS${NC}"
+        echo -e "${GREEN}✅ Множитель: $MULTIPLIER${NC}"
+        echo -e "${GREEN}✅ Тир: $TIER${NC}"
+        echo -e "${GREEN}✅ Аптайм: $UPTIME${NC}"
+        echo -e "${GREEN}✅ Аллокация: $ALLOCATION${NC}"
     else
         echo -e "${RED}❌ Не удалось получить значение поинтов${NC}"
     fi
